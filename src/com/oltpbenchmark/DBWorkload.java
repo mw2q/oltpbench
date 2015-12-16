@@ -169,6 +169,25 @@ public class DBWorkload {
             intervalMonitor = Integer.parseInt(argsLine.getOptionValue("im"));
         }
 
+        // Determine working pidstat flags since it differs between versions.
+        String[] pidstat_cmd = null;
+        if (argsLine.hasOption("stats")) {
+            Process p;
+            String cmd = "pidstat -h -l -d -r -s -u -w";
+            p = Runtime.getRuntime().exec(cmd + " 1 1");
+            if (p.waitFor() != 0) {
+                cmd = "pidstat -h -l -d -r -u -w";
+                p = Runtime.getRuntime().exec(cmd + " 1 1");
+                if (p.waitFor() != 0) {
+                    LOG.info("Could not determine working pidstat flags.");
+                } else {
+                    pidstat_cmd = new String[] { "pidstat", "-h", "-l", "-d", "-r", "-u", "-w", "60" };
+                }
+            } else {
+                pidstat_cmd = new String[] { "pidstat", "-h", "-l", "-d", "-r", "-s", "-u", "-w", "60" };
+            }
+        }
+
         
         // -------------------------------------------------------------------
         // GET PLUGIN LIST
@@ -519,9 +538,16 @@ public class DBWorkload {
 
         // Execute Loader
         if (isBooleanOptionSet(argsLine, "load")) {
-            Process p = null;
+            Process pPidstat = null;
+            Process pSar = null;
+            ProcessBuilder pbPidstat = null;
             if (argsLine.hasOption("stats")) {
-                p = Runtime.getRuntime().exec("sar -o " + outputDirectory + "/" + argsLine.getOptionValue("o") + ".load.sar 60");
+                pSar = Runtime.getRuntime().exec("sar -o " + outputDirectory + "/" + argsLine.getOptionValue("o") + ".load.sar 60");
+                if (pidstat_cmd != null) {
+                    pbPidstat = new ProcessBuilder(pidstat_cmd);
+                    pbPidstat.redirectOutput(new File(outputDirectory + "/" + argsLine.getOptionValue("o") + ".load.pidstat"));
+                    pPidstat = pbPidstat.start();
+                }
             }
             for (BenchmarkModule benchmark : benchList) {
                 LOG.info("Loading data into " + benchmark.getBenchmarkName().toUpperCase() + " database...");
@@ -529,8 +555,11 @@ public class DBWorkload {
                 LOG.info("Finished!");
                 LOG.info(SINGLE_LINE);
             }
-            if (argsLine.hasOption("stats") && p != null) {
-                p.destroy();
+            if (argsLine.hasOption("stats") && pSar != null) {
+                pSar.destroy();
+            }
+            if (argsLine.hasOption("stats") && pPidstat != null) {
+                pPidstat.destroy();
             }
         } else if (LOG.isDebugEnabled()) {
             LOG.debug("Skipping loading benchmark database records");
@@ -551,10 +580,17 @@ public class DBWorkload {
         // Execute Workload
         if (isBooleanOptionSet(argsLine, "execute")) {
             // Bombs away!
-            Process p = null;
+            Process pPidstat = null;
+            Process pSar = null;
+            ProcessBuilder pbPidstat = null;
             Results r = null;
             if (argsLine.hasOption("stats")) {
-                p = Runtime.getRuntime().exec("sar -o " + outputDirectory + "/" + argsLine.getOptionValue("o") + ".execute.sar 60");
+                pSar = Runtime.getRuntime().exec("sar -o " + outputDirectory + "/" + argsLine.getOptionValue("o") + ".execute.sar 60");
+                if (pidstat_cmd != null) {
+                    pbPidstat = new ProcessBuilder(pidstat_cmd);
+                    pbPidstat.redirectOutput(new File(outputDirectory + "/" + argsLine.getOptionValue("o") + ".execute.pidstat"));
+                    pPidstat = pbPidstat.start();
+                }
             }
             try {
                 r = runWorkload(benchList, verbose, intervalMonitor);
@@ -563,8 +599,11 @@ public class DBWorkload {
                 System.exit(1);
             }
             assert(r != null);
-            if (argsLine.hasOption("stats") && p != null) {
-                p.destroy();
+            if (argsLine.hasOption("stats") && pSar != null) {
+                pSar.destroy();
+            }
+            if (argsLine.hasOption("stats") && pPidstat != null) {
+                pPidstat.destroy();
             }
 
             PrintStream ps = System.out;
